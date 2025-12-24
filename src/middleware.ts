@@ -1,93 +1,39 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
-
-// Define role-based route access
-const roleRoutes: Record<string, string[]> = {
-    ADMIN: ["/admin"],
-    OWNER: ["/dashboard/owner"],
-    PARENT: ["/portal"],
-};
 
 // Public routes that don't require authentication
-const publicRoutes = ["/", "/login", "/register"];
+const publicRoutes = ["/", "/login", "/register", "/api/auth"];
 
-// Routes that should be accessible without auth check
-const authRoutes = ["/api/auth"];
-
-export async function middleware(request: NextRequest) {
+export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // Skip auth routes entirely
-    if (authRoutes.some((route) => pathname.startsWith(route))) {
+    // Skip all API auth routes - let NextAuth handle them
+    if (pathname.startsWith("/api/auth")) {
         return NextResponse.next();
     }
 
-    // Get the token from the request
-    // NextAuth v5 uses AUTH_SECRET, but we also check NEXTAUTH_SECRET for compatibility
-    const token = await getToken({
-        req: request,
-        secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET
-    });
+    // Check for session token cookie (NextAuth v5 uses authjs.session-token in production)
+    const sessionToken =
+        request.cookies.get("authjs.session-token")?.value ||
+        request.cookies.get("__Secure-authjs.session-token")?.value ||
+        request.cookies.get("next-auth.session-token")?.value ||
+        request.cookies.get("__Secure-next-auth.session-token")?.value;
+
+    const isAuthenticated = !!sessionToken;
 
     // Allow public routes
-    if (publicRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"))) {
-        // Redirect authenticated users away from login/register and home page
-        if (token && (pathname === "/" || pathname === "/login" || pathname === "/register")) {
-            return redirectToRoleDashboard(request, token.role as string);
-        }
+    if (publicRoutes.some((route) => pathname === route || (route !== "/" && pathname.startsWith(route)))) {
         return NextResponse.next();
     }
 
-    // Require authentication for all other routes
-    if (!token) {
+    // Require authentication for protected routes
+    if (!isAuthenticated) {
         const loginUrl = new URL("/login", request.url);
         loginUrl.searchParams.set("callbackUrl", pathname);
         return NextResponse.redirect(loginUrl);
     }
 
-    const userRole = token.role as string;
-
-    // Check admin routes
-    if (pathname.startsWith("/admin")) {
-        if (userRole !== "ADMIN") {
-            return redirectToRoleDashboard(request, userRole);
-        }
-    }
-
-    // Check owner routes
-    if (pathname.startsWith("/dashboard/owner")) {
-        if (userRole !== "OWNER") {
-            return redirectToRoleDashboard(request, userRole);
-        }
-    }
-
-    // Check parent routes
-    if (pathname.startsWith("/portal")) {
-        if (userRole !== "PARENT") {
-            return redirectToRoleDashboard(request, userRole);
-        }
-    }
-
     return NextResponse.next();
-}
-
-function redirectToRoleDashboard(request: NextRequest, role: string) {
-    let destination = "/login";
-
-    switch (role) {
-        case "ADMIN":
-            destination = "/admin";
-            break;
-        case "OWNER":
-            destination = "/dashboard/owner";
-            break;
-        case "PARENT":
-            destination = "/portal";
-            break;
-    }
-
-    return NextResponse.redirect(new URL(destination, request.url));
 }
 
 export const config = {
