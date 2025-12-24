@@ -1,6 +1,6 @@
-import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
 
 // Define role-based route access
 const roleRoutes: Record<string, string[]> = {
@@ -10,29 +10,42 @@ const roleRoutes: Record<string, string[]> = {
 };
 
 // Public routes that don't require authentication
-const publicRoutes = ["/", "/login", "/register", "/api/auth"];
+const publicRoutes = ["/", "/login", "/register"];
 
-export default auth(async function middleware(request: NextRequest) {
+// Routes that should be accessible without auth check
+const authRoutes = ["/api/auth"];
+
+export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
-    const session = await auth();
+
+    // Skip auth routes entirely
+    if (authRoutes.some((route) => pathname.startsWith(route))) {
+        return NextResponse.next();
+    }
+
+    // Get the token from the request
+    const token = await getToken({
+        req: request,
+        secret: process.env.NEXTAUTH_SECRET
+    });
 
     // Allow public routes
-    if (publicRoutes.some((route) => pathname.startsWith(route))) {
+    if (publicRoutes.some((route) => pathname === route || pathname.startsWith(route + "/"))) {
         // Redirect authenticated users away from login/register and home page
-        if (session && (pathname === "/" || pathname === "/login" || pathname === "/register")) {
-            return redirectToRoleDashboard(request, session.user.role);
+        if (token && (pathname === "/" || pathname === "/login" || pathname === "/register")) {
+            return redirectToRoleDashboard(request, token.role as string);
         }
         return NextResponse.next();
     }
 
     // Require authentication for all other routes
-    if (!session) {
+    if (!token) {
         const loginUrl = new URL("/login", request.url);
         loginUrl.searchParams.set("callbackUrl", pathname);
         return NextResponse.redirect(loginUrl);
     }
 
-    const userRole = session.user.role;
+    const userRole = token.role as string;
 
     // Check admin routes
     if (pathname.startsWith("/admin")) {
@@ -56,10 +69,10 @@ export default auth(async function middleware(request: NextRequest) {
     }
 
     return NextResponse.next();
-});
+}
 
 function redirectToRoleDashboard(request: NextRequest, role: string) {
-    let destination = "/";
+    let destination = "/login";
 
     switch (role) {
         case "ADMIN":
@@ -83,7 +96,7 @@ export const config = {
          * - _next/static (static files)
          * - _next/image (image optimization files)
          * - favicon.ico (favicon file)
-         * - public files
+         * - public files (images, etc.)
          */
         "/((?!_next/static|_next/image|favicon.ico|.*\\..*|api/auth).*)",
     ],
