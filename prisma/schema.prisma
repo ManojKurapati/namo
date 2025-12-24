@@ -1,0 +1,223 @@
+// ECD Portal - Prisma Schema
+// ASQ (Ages & Stages Questionnaires) Framework
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  ADMIN   // Manages questionnaires and intervention videos
+  OWNER   // Views business analytics
+  PARENT  // Manages child profiles and answers questionnaires
+}
+
+enum ASQDomain {
+  COMMUNICATION
+  GROSS_MOTOR
+  FINE_MOTOR
+  PROBLEM_SOLVING
+  PERSONAL_SOCIAL
+}
+
+enum AnswerType {
+  YES         // Score: 10
+  SOMETIMES   // Score: 5
+  NOT_YET     // Score: 0
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String?
+  role          Role      @default(PARENT)
+  emailVerified DateTime?
+  image         String?
+  
+  // Relations
+  children      Child[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+// ============================================
+// CHILD PROFILE
+// ============================================
+
+model Child {
+  id            String    @id @default(cuid())
+  name          String
+  dateOfBirth   DateTime
+  gender        String?
+  notes         String?
+  
+  // Parent relationship
+  parentId      String
+  parent        User      @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  
+  // Assessments
+  assessments   AssessmentRecord[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([parentId])
+  @@index([dateOfBirth])
+}
+
+// ============================================
+// ASQ QUESTIONNAIRE
+// ============================================
+
+model Questionnaire {
+  id            String      @id @default(cuid())
+  domain        ASQDomain
+  ageInterval   Int         // ASQ age interval in months (2, 4, 6, 8, 9, 10, 12, etc.)
+  questionText  String
+  orderIndex    Int         // Order within the domain/age group
+  helpText      String?     // Additional instructions
+  isActive      Boolean     @default(true)
+  
+  // Relations
+  answers       QuestionAnswer[]
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([domain, ageInterval, orderIndex])
+  @@index([domain])
+  @@index([ageInterval])
+  @@index([isActive])
+}
+
+// ============================================
+// ASSESSMENT RECORDS
+// ============================================
+
+model AssessmentRecord {
+  id                String    @id @default(cuid())
+  
+  // Child relationship
+  childId           String
+  child             Child     @relation(fields: [childId], references: [id], onDelete: Cascade)
+  
+  // Assessment metadata
+  ageAtAssessment   Int       // Child's exact age in months at assessment time
+  ageInterval       Int       // ASQ interval used (2, 4, 6, 8, etc.)
+  status            String    @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
+  
+  // Results
+  answers           QuestionAnswer[]
+  domainScores      DomainScore[]
+  
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([childId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model QuestionAnswer {
+  id              String           @id @default(cuid())
+  
+  // Relations
+  assessmentId    String
+  assessment      AssessmentRecord @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId      String
+  question        Questionnaire    @relation(fields: [questionId], references: [id])
+  
+  // Answer data
+  answer          AnswerType
+  score           Int              // 10, 5, or 0
+  
+  createdAt       DateTime         @default(now())
+
+  @@unique([assessmentId, questionId])
+  @@index([assessmentId])
+  @@index([questionId])
+}
+
+model DomainScore {
+  id                  String           @id @default(cuid())
+  
+  // Relations
+  assessmentId        String
+  assessment          AssessmentRecord @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  
+  // Score data
+  domain              ASQDomain
+  totalScore          Int
+  maxPossibleScore    Int              // Usually 60 (6 questions × 10 points)
+  threshold           Int              // Cutoff score for concern
+  needsIntervention   Boolean          @default(false)
+  
+  createdAt           DateTime         @default(now())
+
+  @@unique([assessmentId, domain])
+  @@index([assessmentId])
+  @@index([domain])
+  @@index([needsIntervention])
+}
+
+// ============================================
+// INTERVENTION VIDEOS
+// ============================================
+
+model InterventionVideo {
+  id              String      @id @default(cuid())
+  title           String
+  description     String?
+  videoUrl        String      // YouTube, Vimeo, or Cloud Storage URL
+  thumbnailUrl    String?
+  duration        Int?        // Duration in seconds
+  
+  // Targeting
+  domain          ASQDomain
+  minAgeInterval  Int         // Minimum age interval (inclusive)
+  maxAgeInterval  Int         // Maximum age interval (inclusive)
+  scoreThreshold  Int         // Show video if score is below this threshold
+  
+  // Status
+  isActive        Boolean     @default(true)
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([domain])
+  @@index([isActive])
+  @@index([scoreThreshold])
+}
+
+// ============================================
+// ASQ THRESHOLDS (Reference Data)
+// ============================================
+
+model ASQThreshold {
+  id            String      @id @default(cuid())
+  ageInterval   Int
+  domain        ASQDomain
+  cutoffScore   Int         // Score below this indicates concern
+  monitorScore  Int         // Score below this needs monitoring
+  
+  @@unique([ageInterval, domain])
+  @@index([ageInterval])
+}
