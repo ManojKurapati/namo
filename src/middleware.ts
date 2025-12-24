@@ -24,9 +24,10 @@ export async function middleware(request: NextRequest) {
     }
 
     // Get the token from the request
+    // NextAuth v5 uses AUTH_SECRET, but we also check NEXTAUTH_SECRET for compatibility
     const token = await getToken({
         req: request,
-        secret: process.env.NEXTAUTH_SECRET
+        secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET
     });
 
     // Allow public routes
